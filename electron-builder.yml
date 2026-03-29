@@ -1,0 +1,30 @@
+appId: com.selfcontrol.deltaforceblocker
+productName: Delta Force 屏蔽器
+
+directories:
+  output: dist
+  buildResources: assets
+
+files:
+  - src/**
+  - package.json
+  - "!src/**/*.map"
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  requestedExecutionLevel: requireAdministrator
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Delta Force 屏蔽器
+  runAfterFinish: true
+  installerLanguages:
+    - zh_CN
+    - en_US
+  language: 2052

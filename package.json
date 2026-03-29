@@ -1,0 +1,20 @@
+{
+  "name": "delta-force-blocker",
+  "version": "1.0.0",
+  "description": "屏蔽 Delta Force 游戏安装与启动的桌面工具",
+  "author": "selfcontrol",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "prebuild": "node scripts/prebuild.js",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  },
+  "devDependencies": {
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1"
+  }
+}

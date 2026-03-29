@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>Delta Force 屏蔽器</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- 标题 -->
+    <header>
+      <div class="app-icon">🚫</div>
+      <h1>Delta Force 屏蔽器</h1>
+      <span class="subtitle" id="version">v1.0.0</span>
+    </header>
+
+    <!-- 主开关卡片 -->
+    <div class="card main-toggle-card">
+      <div class="status-indicator inactive" id="statusIndicator">🛡️</div>
+      <div class="status-text">
+        <div class="label" id="statusLabel">屏蔽未开启</div>
+        <div class="desc" id="statusDesc">点击右侧开关启动屏蔽引擎</div>
+      </div>
+      <label class="switch" title="开启/关闭屏蔽">
+        <input type="checkbox" id="blockingToggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- 设置卡片 -->
+    <div class="card">
+      <div class="card-title">设置</div>
+
+      <div class="toggle-wrap">
+        <div class="toggle-info">
+          <div class="toggle-label">开机自动启动屏蔽</div>
+          <div class="toggle-desc">系统启动时自动开启拦截（需打包版本）</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="autoStartToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 游戏检测卡片 -->
+    <div class="card">
+      <div class="card-title">游戏安装检测</div>
+      <ul class="paths-list" id="pathsList">
+        <li class="no-detection">未检测到游戏安装</li>
+      </ul>
+      <button class="scan-btn" id="scanBtn">🔍 立即扫描</button>
+    </div>
+
+    <!-- 日志卡片 -->
+    <div class="card log-card">
+      <div class="card-title">
+        活动日志
+        <button class="log-clear" id="clearLogBtn">清除</button>
+      </div>
+      <ul class="log-list" id="logList">
+        <li class="log-entry info">
+          <span class="log-time">--:--:--</span>
+          <span class="log-msg">等待启动...</span>
+        </li>
+      </ul>
+    </div>
+
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
