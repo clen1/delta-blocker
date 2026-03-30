@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -17,15 +17,19 @@ function getConfigPath() {
 
 function loadConfig() {
   try {
-    return JSON.parse(fs.readFileSync(getConfigPath(), 'utf8'))
+    const raw = fs.readFileSync(getConfigPath(), 'utf8')
+    return JSON.parse(raw)
   } catch {
-    return { blocking: false }
+    return {}
   }
 }
 
 function saveConfig() {
   try {
-    fs.writeFileSync(getConfigPath(), JSON.stringify({ blocking: state.blocking }), 'utf8')
+    fs.writeFileSync(getConfigPath(), JSON.stringify({
+      blocking: state.blocking,
+      autoStart: state.autoStart,
+    }), 'utf8')
   } catch {}
 }
 
@@ -256,39 +260,30 @@ function setAutoStart(enabled) {
   }
   const exePath = process.execPath
   if (enabled) {
-    // 用 schtasks.exe 注册（兼容性更好），/rl HIGHEST = 以最高权限运行，无 UAC 弹窗
-    const safeExe = exePath.replace(/'/g, "''")
-    const out = runPSSync(`
-$exe = '${safeExe}'
-$quotedExe = '"' + $exe + '"'
-$result = & schtasks.exe /create /f /tn "${TASK_NAME}" /tr $quotedExe /sc ONLOGON /rl HIGHEST 2>&1
-Write-Output "EXIT:$LASTEXITCODE"
-Write-Output "OUT:$result"
+    // 用任务计划程序注册登录时以最高权限运行，不会弹 UAC
+    runPSSync(`
+$action   = New-ScheduledTaskAction -Execute '${exePath}'
+$trigger  = New-ScheduledTaskTrigger -AtLogon
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
+Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
     `)
-    const exitMatch = out.match(/EXIT:(\d+)/)
-    const exitCode = exitMatch ? parseInt(exitMatch[1]) : -1
-    const detail = (out.match(/OUT:(.+)/s) || [])[1]?.trim() || ''
-
-    if (exitCode === 0) {
-      emitLog('[自启] ✓ 任务计划注册成功，下次登录自动以管理员权限启动', 'success')
-    } else {
-      emitLog(`[自启] ✗ 注册失败 (code ${exitCode}): ${detail}`, 'warn')
-      state.autoStart = false
-      pushState()
-      return
-    }
+    emitLog('[自启] 已注册任务计划，下次登录自动以管理员权限启动', 'success')
   } else {
-    runPSSync(`schtasks.exe /delete /f /tn "${TASK_NAME}" 2>&1 | Out-Null`)
+    runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
     emitLog('[自启] 已移除任务计划启动项', 'info')
   }
   state.autoStart = enabled
+  saveConfig()
   pushState()
 }
 
 function getAutoStartState() {
   if (!app.isPackaged) return false
-  const out = runPSSync(`schtasks.exe /query /tn "${TASK_NAME}" 2>&1 | Out-Null; Write-Output $LASTEXITCODE`)
-  return out.trim() === '0'
+  const out = runPSSync(
+    `Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty TaskName`
+  )
+  return out.trim() === TASK_NAME
 }
 
 // ─── 游戏路径扫描 ──────────────────────────────────────────────────────────────
@@ -439,38 +434,29 @@ ipcMain.handle('trigger-scan', async () => {
 
 // ─── 应用初始化 ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  // 从配置文件恢复上次状态
+  const config = loadConfig()
+
   createWindow()
 
   tray = new Tray(createTrayIcon())
-  rebuildTray()
   tray.on('double-click', () => { win.show(); win.focus() })
 
-  // 读取自启状态
+  // 恢复自启状态（以任务计划程序为准）
   state.autoStart = getAutoStartState()
+
+  // 恢复屏蔽状态（如果上次是开启的，自动继续屏蔽）
+  if (config.blocking) {
+    emitLog('[启动] 检测到上次屏蔽已开启，自动恢复...', 'info')
+    setBlocking(true)
+  } else {
+    rebuildTray()
+  }
 
   // 启动时扫描
   await runScan()
 
-  // 读取上次屏蔽状态，弹确认框
-  const config = loadConfig()
-  if (config.blocking) {
-    const { response } = await dialog.showMessageBox(win, {
-      type: 'question',
-      title: 'Delta Force 屏蔽器',
-      message: '是否开启游戏屏蔽？',
-      detail: '上次关闭时屏蔽处于开启状态。',
-      buttons: ['开启屏蔽', '暂不'],
-      defaultId: 0,
-      cancelId: 1,
-    })
-    if (response === 0) {
-      setBlocking(true)
-    } else {
-      emitLog('[启动] 已跳过屏蔽，可手动开启', 'info')
-    }
-  } else {
-    emitLog('[启动] 应用已就绪，点击"开启屏蔽"开始拦截', 'info')
-  }
+  emitLog('[启动] 应用已就绪', 'info')
 })
 
 app.on('second-instance', () => {
