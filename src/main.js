@@ -256,27 +256,28 @@ function setAutoStart(enabled) {
   }
   const exePath = process.execPath
   if (enabled) {
-    // 用任务计划程序注册登录时以最高权限运行，不会弹 UAC
-    runPSSync(`
-$exePath = '${exePath.replace(/'/g, "''")}'
-$action   = New-ScheduledTaskAction -Execute $exePath
-$trigger  = New-ScheduledTaskTrigger -AtLogon -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
-Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    // 用 schtasks.exe 注册（兼容性更好），/rl HIGHEST = 以最高权限运行，无 UAC 弹窗
+    const safeExe = exePath.replace(/'/g, "''")
+    const out = runPSSync(`
+$exe = '${safeExe}'
+$result = & schtasks.exe /create /f /tn "${TASK_NAME}" /tr "`"$exe`"" /sc ONLOGON /rl HIGHEST 2>&1
+Write-Output "EXIT:$LASTEXITCODE"
+Write-Output "OUT:$result"
     `)
-    // 验证是否注册成功
-    const verify = getAutoStartState()
-    if (verify) {
+    const exitMatch = out.match(/EXIT:(\d+)/)
+    const exitCode = exitMatch ? parseInt(exitMatch[1]) : -1
+    const detail = (out.match(/OUT:(.+)/s) || [])[1]?.trim() || ''
+
+    if (exitCode === 0) {
       emitLog('[自启] ✓ 任务计划注册成功，下次登录自动以管理员权限启动', 'success')
     } else {
-      emitLog('[自启] ✗ 任务计划注册失败，请检查权限', 'warn')
+      emitLog(`[自启] ✗ 注册失败 (code ${exitCode}): ${detail}`, 'warn')
       state.autoStart = false
       pushState()
       return
     }
   } else {
-    runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
+    runPSSync(`schtasks.exe /delete /f /tn "${TASK_NAME}" 2>&1 | Out-Null`)
     emitLog('[自启] 已移除任务计划启动项', 'info')
   }
   state.autoStart = enabled
@@ -285,10 +286,8 @@ Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigge
 
 function getAutoStartState() {
   if (!app.isPackaged) return false
-  const out = runPSSync(
-    `Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty TaskName`
-  )
-  return out.trim() === TASK_NAME
+  const out = runPSSync(`schtasks.exe /query /tn "${TASK_NAME}" 2>&1 | Out-Null; Write-Output $LASTEXITCODE`)
+  return out.trim() === '0'
 }
 
 // ─── 游戏路径扫描 ──────────────────────────────────────────────────────────────
