@@ -260,7 +260,8 @@ function setAutoStart(enabled) {
     const safeExe = exePath.replace(/'/g, "''")
     const out = runPSSync(`
 $exe = '${safeExe}'
-$result = & schtasks.exe /create /f /tn "${TASK_NAME}" /tr "`"$exe`"" /sc ONLOGON /rl HIGHEST 2>&1
+$quotedExe = '"' + $exe + '"'
+$result = & schtasks.exe /create /f /tn "${TASK_NAME}" /tr $quotedExe /sc ONLOGON /rl HIGHEST 2>&1
 Write-Output "EXIT:$LASTEXITCODE"
 Write-Output "OUT:$result"
     `)
