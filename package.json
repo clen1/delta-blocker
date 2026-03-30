@@ -1,6 +1,6 @@
 {
   "name": "delta-force-blocker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "屏蔽 Delta Force 游戏安装与启动的桌面工具",
   "author": "selfcontrol",
   "main": "src/main.js",

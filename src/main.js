@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -8,6 +8,25 @@ const { exec, execSync } = require('child_process')
 if (!app.requestSingleInstanceLock()) {
   app.quit()
   process.exit(0)
+}
+
+// ─── 配置持久化 ───────────────────────────────────────────────────────────────
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'config.json')
+}
+
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(getConfigPath(), 'utf8'))
+  } catch {
+    return { blocking: false }
+  }
+}
+
+function saveConfig() {
+  try {
+    fs.writeFileSync(getConfigPath(), JSON.stringify({ blocking: state.blocking }), 'utf8')
+  } catch {}
 }
 
 // ─── 全局状态 ────────────────────────────────────────────────────────────────
@@ -220,6 +239,7 @@ function setBlocking(enabled) {
     }
     stopFileWatcher()
   }
+  saveConfig()
   rebuildTray()
   pushState()
 }
@@ -238,13 +258,23 @@ function setAutoStart(enabled) {
   if (enabled) {
     // 用任务计划程序注册登录时以最高权限运行，不会弹 UAC
     runPSSync(`
-$action   = New-ScheduledTaskAction -Execute '${exePath}'
-$trigger  = New-ScheduledTaskTrigger -AtLogon
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
+$exePath = '${exePath.replace(/'/g, "''")}'
+$action   = New-ScheduledTaskAction -Execute $exePath
+$trigger  = New-ScheduledTaskTrigger -AtLogon -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
 Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
     `)
-    emitLog('[自启] 已注册任务计划，下次登录自动以管理员权限启动', 'success')
+    // 验证是否注册成功
+    const verify = getAutoStartState()
+    if (verify) {
+      emitLog('[自启] ✓ 任务计划注册成功，下次登录自动以管理员权限启动', 'success')
+    } else {
+      emitLog('[自启] ✗ 任务计划注册失败，请检查权限', 'warn')
+      state.autoStart = false
+      pushState()
+      return
+    }
   } else {
     runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
     emitLog('[自启] 已移除任务计划启动项', 'info')
@@ -421,7 +451,26 @@ app.whenReady().then(async () => {
   // 启动时扫描
   await runScan()
 
-  emitLog('[启动] 应用已就绪，点击"开启屏蔽"开始拦截', 'info')
+  // 读取上次屏蔽状态，弹确认框
+  const config = loadConfig()
+  if (config.blocking) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'question',
+      title: 'Delta Force 屏蔽器',
+      message: '是否开启游戏屏蔽？',
+      detail: '上次关闭时屏蔽处于开启状态。',
+      buttons: ['开启屏蔽', '暂不'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) {
+      setBlocking(true)
+    } else {
+      emitLog('[启动] 已跳过屏蔽，可手动开启', 'info')
+    }
+  } else {
+    emitLog('[启动] 应用已就绪，点击"开启屏蔽"开始拦截', 'info')
+  }
 })
 
 app.on('second-instance', () => {
