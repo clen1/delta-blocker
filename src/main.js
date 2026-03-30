@@ -224,7 +224,9 @@ function setBlocking(enabled) {
   pushState()
 }
 
-// ─── 开机自启 ──────────────────────────────────────────────────────────────────
+// ─── 开机自启（使用任务计划程序，支持管理员权限无弹窗启动）─────────────────────
+const TASK_NAME = 'DeltaForceBlocker'
+
 function setAutoStart(enabled) {
   if (!app.isPackaged) {
     emitLog('[提示] 开发模式下开机自启不生效，请打包后使用', 'warn')
@@ -234,15 +236,18 @@ function setAutoStart(enabled) {
   }
   const exePath = process.execPath
   if (enabled) {
-    runPSSync(
-      `Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'DeltaForceBlocker' -Value '"${exePath}"'`
-    )
-    emitLog('[自启] 已添加开机启动项', 'success')
+    // 用任务计划程序注册登录时以最高权限运行，不会弹 UAC
+    runPSSync(`
+$action   = New-ScheduledTaskAction -Execute '${exePath}'
+$trigger  = New-ScheduledTaskTrigger -AtLogon
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
+Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    `)
+    emitLog('[自启] 已注册任务计划，下次登录自动以管理员权限启动', 'success')
   } else {
-    runPSSync(
-      `Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'DeltaForceBlocker' -ErrorAction SilentlyContinue`
-    )
-    emitLog('[自启] 已移除开机启动项', 'info')
+    runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
+    emitLog('[自启] 已移除任务计划启动项', 'info')
   }
   state.autoStart = enabled
   pushState()
@@ -251,9 +256,9 @@ function setAutoStart(enabled) {
 function getAutoStartState() {
   if (!app.isPackaged) return false
   const out = runPSSync(
-    `Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'DeltaForceBlocker' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty DeltaForceBlocker`
+    `Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty TaskName`
   )
-  return out.length > 0
+  return out.trim() === TASK_NAME
 }
 
 // ─── 游戏路径扫描 ──────────────────────────────────────────────────────────────
