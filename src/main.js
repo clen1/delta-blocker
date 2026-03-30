@@ -248,29 +248,24 @@ function setBlocking(enabled) {
   pushState()
 }
 
-// ─── 开机自启（使用任务计划程序，支持管理员权限无弹窗启动）─────────────────────
+// ─── 开机自启（schtasks.exe，支持管理员权限无弹窗启动）──────────────────────────
 const TASK_NAME = 'DeltaForceBlocker'
 
 function setAutoStart(enabled) {
-  if (!app.isPackaged) {
-    emitLog('[提示] 开发模式下开机自启不生效，请打包后使用', 'warn')
-    state.autoStart = false
-    pushState()
-    return
-  }
   const exePath = process.execPath
   if (enabled) {
-    // 用任务计划程序注册登录时以最高权限运行，不会弹 UAC
-    runPSSync(`
-$action   = New-ScheduledTaskAction -Execute '${exePath}'
-$trigger  = New-ScheduledTaskTrigger -AtLogon
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries $true -DontStopIfGoingOnBatteries $true
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
-Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-    `)
-    emitLog('[自启] 已注册任务计划，下次登录自动以管理员权限启动', 'success')
+    // schtasks.exe 比 PowerShell cmdlet 更可靠，/rl HIGHEST 需要管理员权限
+    const result = runPSSync(`
+$out = & schtasks /create /tn "${TASK_NAME}" /tr '"${exePath}"' /sc ONLOGON /rl HIGHEST /f 2>&1
+if ($LASTEXITCODE -eq 0) { "OK" } else { "FAIL:" + ($out -join " ") }
+`)
+    if (result.startsWith('OK')) {
+      emitLog('[自启] 任务计划注册成功，下次登录将自动启动', 'success')
+    } else {
+      emitLog(`[自启] 注册失败: ${result} — 请确认以管理员身份运行`, 'warn')
+    }
   } else {
-    runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
+    runPSSync(`schtasks /delete /tn "${TASK_NAME}" /f 2>&1 | Out-Null`)
     emitLog('[自启] 已移除任务计划启动项', 'info')
   }
   state.autoStart = enabled
@@ -279,11 +274,10 @@ Register-ScheduledTask -TaskName '${TASK_NAME}' -Action $action -Trigger $trigge
 }
 
 function getAutoStartState() {
-  if (!app.isPackaged) return false
   const out = runPSSync(
-    `Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty TaskName`
+    `$t = Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue; if ($t) { "true" } else { "false" }`
   )
-  return out.trim() === TASK_NAME
+  return out.trim() === 'true'
 }
 
 // ─── 游戏路径扫描 ──────────────────────────────────────────────────────────────
@@ -442,10 +436,19 @@ app.whenReady().then(async () => {
   tray = new Tray(createTrayIcon())
   tray.on('double-click', () => { win.show(); win.focus() })
 
-  // 恢复自启状态（以任务计划程序为准）
-  state.autoStart = getAutoStartState()
+  // 从配置恢复自启状态（UI 显示用），再用任务计划验证实际状态
+  state.autoStart = config.autoStart || false
+  const taskActuallyExists = getAutoStartState()
+  if (state.autoStart && !taskActuallyExists) {
+    // 配置显示应该自启，但任务不存在（如重装后），自动重建
+    emitLog('[自启] 任务计划丢失，正在重新注册...', 'warn')
+    setAutoStart(true)
+  } else if (!state.autoStart && taskActuallyExists) {
+    // 配置显示关闭但任务还在，清理掉
+    setAutoStart(false)
+  }
 
-  // 恢复屏蔽状态（如果上次是开启的，自动继续屏蔽）
+  // 恢复屏蔽状态
   if (config.blocking) {
     emitLog('[启动] 检测到上次屏蔽已开启，自动恢复...', 'info')
     setBlocking(true)
