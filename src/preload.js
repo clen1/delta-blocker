@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 切换开机自启
   setAutoStart: (enabled) => ipcRenderer.invoke('set-autostart', enabled),
 
+  // 切换进程保护
+  setWatchdog: (enabled) => ipcRenderer.invoke('set-watchdog', enabled),
+
   // 手动扫描游戏安装路径
   triggerScan: () => ipcRenderer.invoke('trigger-scan'),
 

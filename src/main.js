@@ -29,6 +29,7 @@ function saveConfig() {
     fs.writeFileSync(getConfigPath(), JSON.stringify({
       blocking: state.blocking,
       autoStart: state.autoStart,
+      watchdog: state.watchdog,
     }), 'utf8')
   } catch {}
 }
@@ -37,6 +38,7 @@ function saveConfig() {
 const state = {
   blocking: false,
   autoStart: false,
+  watchdog: false,
   detectedPaths: [],
   log: [],
 }
@@ -245,6 +247,62 @@ function setBlocking(enabled) {
   }
   saveConfig()
   rebuildTray()
+  pushState()
+}
+
+// ─── 防任务管理器守护进程 ────────────────────────────────────────────────────────
+const WATCHDOG_STOP_FILE   = path.join(os.tmpdir(), 'dfblocker_stop.sig')
+const WATCHDOG_SCRIPT_FILE = path.join(os.tmpdir(), 'dfblocker_watchdog.ps1')
+
+function startWatchdog() {
+  if (!app.isPackaged) {
+    emitLog('[保护] 开发模式下跳过守护进程', 'info')
+    return
+  }
+  // 清除残留停止信号
+  try { fs.unlinkSync(WATCHDOG_STOP_FILE) } catch {}
+
+  const exePath  = process.execPath.replace(/'/g, "''")
+  const stopFile = WATCHDOG_STOP_FILE.replace(/'/g, "''")
+  const pid      = process.pid
+
+  const script = [
+    `$stopFile  = '${stopFile}'`,
+    `$exePath   = '${exePath}'`,
+    `$targetPid = ${pid}`,
+    `while ($true) {`,
+    `  Start-Sleep -Seconds 2`,
+    `  if (Test-Path $stopFile) { Remove-Item $stopFile -Force -ErrorAction SilentlyContinue; break }`,
+    `  try { Get-Process -Id $targetPid -ErrorAction Stop | Out-Null }`,
+    `  catch {`,
+    `    Start-Sleep -Milliseconds 500`,
+    `    if (-not (Test-Path $stopFile)) { Start-Process -FilePath $exePath }`,
+    `    break`,
+    `  }`,
+    `}`,
+    `Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue`,
+  ].join('\n')
+
+  try { fs.writeFileSync(WATCHDOG_SCRIPT_FILE, `\uFEFF${script}`, 'utf8') } catch { return }
+
+  const sf = WATCHDOG_SCRIPT_FILE.replace(/'/g, "''")
+  runPSSync(`Start-Process powershell -WindowStyle Hidden -ArgumentList @('-NonInteractive','-NoProfile','-ExecutionPolicy','Bypass','-File','${sf}')`)
+  emitLog('[保护] 守护进程已启动，程序无法被任务管理器强制结束', 'success')
+}
+
+function stopWatchdog() {
+  try { fs.writeFileSync(WATCHDOG_STOP_FILE, 'stop', 'utf8') } catch {}
+}
+
+function setWatchdog(enabled) {
+  state.watchdog = enabled
+  if (enabled) {
+    startWatchdog()
+  } else {
+    stopWatchdog()
+    emitLog('[保护] 守护进程已停止', 'info')
+  }
+  saveConfig()
   pushState()
 }
 
@@ -470,6 +528,11 @@ ipcMain.handle('set-autostart', async (_e, enabled) => {
   return { ...state }
 })
 
+ipcMain.handle('set-watchdog', (_e, enabled) => {
+  setWatchdog(enabled)
+  return { ...state }
+})
+
 ipcMain.handle('trigger-scan', async () => {
   await runScan()
   return { ...state }
@@ -484,6 +547,10 @@ app.whenReady().then(async () => {
 
   tray = new Tray(createTrayIcon())
   tray.on('double-click', () => { win.show(); win.focus() })
+
+  // 恢复进程保护状态
+  state.watchdog = config.watchdog || false
+  if (state.watchdog) startWatchdog()
 
   // 从配置恢复自启状态（UI 显示用），再用任务计划验证实际状态
   state.autoStart = config.autoStart || false
@@ -521,4 +588,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  stopWatchdog()
 })

@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
 const blockingToggle = document.getElementById('blockingToggle')
 const autoStartToggle = document.getElementById('autoStartToggle')
+const watchdogToggle  = document.getElementById('watchdogToggle')
 const statusIndicator = document.getElementById('statusIndicator')
 const statusLabel = document.getElementById('statusLabel')
 const statusDesc = document.getElementById('statusDesc')
@@ -22,6 +23,9 @@ function applyState(state) {
 
   // 自启
   autoStartToggle.checked = state.autoStart
+
+  // 进程保护
+  watchdogToggle.checked = state.watchdog
 
   // 检测路径
   renderPaths(state.detectedPaths || [])
@@ -112,6 +116,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const newState = await window.electronAPI.setAutoStart(autoStartToggle.checked)
     applyState(newState)
     autoStartToggle.disabled = false
+  })
+
+  // ── 进程保护开关 ──
+  watchdogToggle.addEventListener('change', async () => {
+    watchdogToggle.disabled = true
+    const newState = await window.electronAPI.setWatchdog(watchdogToggle.checked)
+    applyState(newState)
+    watchdogToggle.disabled = false
   })
 
   // ── 扫描按钮 ──
