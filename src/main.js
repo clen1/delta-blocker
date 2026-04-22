@@ -251,8 +251,8 @@ function setBlocking(enabled) {
 }
 
 // ─── 防任务管理器守护进程 ────────────────────────────────────────────────────────
-const WATCHDOG_STOP_FILE   = path.join(os.tmpdir(), 'dfblocker_stop.sig')
-const WATCHDOG_SCRIPT_FILE = path.join(os.tmpdir(), 'dfblocker_watchdog.ps1')
+// 停止信号文件（主进程正常退出时写入，通知守护进程不要重启）
+const WATCHDOG_STOP_FILE = path.join(os.tmpdir(), 'dfblocker_stop.sig')
 
 function startWatchdog() {
   if (!app.isPackaged) {
@@ -266,28 +266,27 @@ function startWatchdog() {
   const stopFile = WATCHDOG_STOP_FILE.replace(/'/g, "''")
   const pid      = process.pid
 
-  const script = [
-    `$stopFile  = '${stopFile}'`,
-    `$exePath   = '${exePath}'`,
-    `$targetPid = ${pid}`,
-    `while ($true) {`,
-    `  Start-Sleep -Seconds 2`,
-    `  if (Test-Path $stopFile) { Remove-Item $stopFile -Force -ErrorAction SilentlyContinue; break }`,
-    `  try { Get-Process -Id $targetPid -ErrorAction Stop | Out-Null }`,
-    `  catch {`,
-    `    Start-Sleep -Milliseconds 500`,
-    `    if (-not (Test-Path $stopFile)) { Start-Process -FilePath $exePath }`,
+  // 内联 PS 脚本，以 UTF-16LE Base64 编码传入 -EncodedCommand
+  // 无临时文件依赖，不会被杀软拦截或意外删除
+  const ps = [
+    `$sf='${stopFile}'`,
+    `$ex='${exePath}'`,
+    `$p=${pid}`,
+    `while($true){`,
+    `  Start-Sleep -Seconds 1`,
+    `  if(Test-Path $sf){Remove-Item $sf -Force -EA 0;break}`,
+    `  try{Get-Process -Id $p -EA Stop|Out-Null}`,
+    `  catch{`,
+    `    Start-Sleep -Milliseconds 200`,
+    `    if(!(Test-Path $sf)){Start-Process -FilePath $ex}`,
     `    break`,
     `  }`,
     `}`,
-    `Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue`,
   ].join('\n')
 
-  try { fs.writeFileSync(WATCHDOG_SCRIPT_FILE, `\uFEFF${script}`, 'utf8') } catch { return }
-
-  const sf = WATCHDOG_SCRIPT_FILE.replace(/'/g, "''")
-  runPSSync(`Start-Process powershell -WindowStyle Hidden -ArgumentList @('-NonInteractive','-NoProfile','-ExecutionPolicy','Bypass','-File','${sf}')`)
-  emitLog('[保护] 守护进程已启动，程序无法被任务管理器强制结束', 'success')
+  const encoded = Buffer.from(ps, 'utf16le').toString('base64')
+  runPSSync(`Start-Process powershell -WindowStyle Hidden -ArgumentList @('-NonInteractive','-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}')`)
+  emitLog('[保护] 守护进程已启动，被任务管理器强制结束后将在 ~1 秒内自动恢复', 'success')
 }
 
 function stopWatchdog() {
