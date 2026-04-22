@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } = require('electron')
 const path = require('path')
 const os = require('os')
 const fs = require('fs')
@@ -248,16 +248,53 @@ function setBlocking(enabled) {
   pushState()
 }
 
-// ─── 开机自启（schtasks.exe，支持管理员权限无弹窗启动）──────────────────────────
+// ─── 开机自启（XML 直接注册，原生 Unicode，无 cmdlet 兼容性问题）─────────────────
 const TASK_NAME = 'DeltaForceBlocker'
 
 function setAutoStart(enabled) {
-  const exePath = process.execPath
   if (enabled) {
-    // schtasks.exe 比 PowerShell cmdlet 更可靠，/rl HIGHEST 需要管理员权限
+    const exePath = process.execPath
+    // 开发模式下需附加 app 目录作为参数；XML 中用 &quot; 转义双引号
+    const argsElem = app.isPackaged
+      ? ''
+      : `      <Arguments>&quot;${app.getAppPath()}&quot;</Arguments>`
     const result = runPSSync(`
-$out = & schtasks /create /tn "${TASK_NAME}" /tr '"${exePath}"' /sc ONLOGON /rl HIGHEST /f 2>&1
-if ($LASTEXITCODE -eq 0) { "OK" } else { "FAIL:" + ($out -join " ") }
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$user = "$env:USERDOMAIN\\$env:USERNAME"
+$xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo />
+  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$user</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>${exePath}</Command>
+${argsElem}
+    </Exec>
+  </Actions>
+</Task>
+"@
+try {
+  Register-ScheduledTask -TaskName '${TASK_NAME}' -Xml $xml -Force -ErrorAction Stop | Out-Null
+  "OK"
+} catch {
+  "FAIL:" + $_.Exception.Message
+}
 `)
     if (result.startsWith('OK')) {
       emitLog('[自启] 任务计划注册成功，下次登录将自动启动', 'success')
@@ -265,7 +302,7 @@ if ($LASTEXITCODE -eq 0) { "OK" } else { "FAIL:" + ($out -join " ") }
       emitLog(`[自启] 注册失败: ${result} — 请确认以管理员身份运行`, 'warn')
     }
   } else {
-    runPSSync(`schtasks /delete /tn "${TASK_NAME}" /f 2>&1 | Out-Null`)
+    runPSSync(`Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue`)
     emitLog('[自启] 已移除任务计划启动项', 'info')
   }
   state.autoStart = enabled
@@ -416,7 +453,19 @@ ipcMain.handle('set-blocking', (_e, enabled) => {
   return { ...state }
 })
 
-ipcMain.handle('set-autostart', (_e, enabled) => {
+ipcMain.handle('set-autostart', async (_e, enabled) => {
+  if (enabled) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['确认开启', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      title: '开机自启',
+      message: '开启开机自启需要管理员权限',
+      detail: '将在 Windows 任务计划程序中注册开机自启任务，以管理员权限在登录时自动运行本程序。\n\n是否继续？',
+    })
+    if (response !== 0) return { ...state }
+  }
   setAutoStart(enabled)
   return { ...state }
 })
