@@ -211,6 +211,242 @@ header .subtitle {
   transform: translateX(20px);
 }
 
+/* ── card-title-row（带内联开关）──────────────────────────────── */
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.card-title-row .card-title {
+  margin-bottom: 0;
+}
+
+/* ── 通用操作按钮 ──────────────────────────────────────────────── */
+.action-btn {
+  padding: 7px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), opacity var(--transition);
+  white-space: nowrap;
+}
+
+.action-btn:hover { background: var(--accent-hover); }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.action-btn-full { width: 100%; margin-top: 10px; }
+
+.action-btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--card-border);
+}
+
+.action-btn-ghost:hover {
+  background: rgba(0,0,0,0.04);
+  color: var(--text);
+}
+
+/* ── 密码保护 ─────────────────────────────────────────────────── */
+.password-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+}
+
+.pwd-status {
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.pwd-on  { color: var(--success); background: rgba(16,124,16,0.07); }
+.pwd-off { color: var(--text-muted); background: rgba(0,0,0,0.03); }
+.pwd-err { color: var(--danger);  background: rgba(196,43,28,0.07); }
+
+.pwd-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pwd-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.pwd-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0,103,192,0.12);
+}
+
+/* ── 密码弹窗 ─────────────────────────────────────────────────── */
+.pwd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.12s ease;
+}
+
+.pwd-dialog {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 24px 22px 20px;
+  width: 300px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pwd-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pwd-dialog-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: -4px;
+}
+
+.pwd-dialog-input { margin-top: 4px; }
+
+.pwd-dialog-err {
+  font-size: 12px;
+  color: var(--danger);
+  min-height: 16px;
+}
+
+.pwd-dialog-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* ── 时间计划 ─────────────────────────────────────────────────── */
+.schedule-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.schedule-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sched-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sched-day-label {
+  font-size: 13px;
+  font-weight: 600;
+  width: 32px;
+  flex-shrink: 0;
+  padding-top: 7px;
+  color: var(--text-secondary);
+}
+
+.sched-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.sched-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time-input {
+  padding: 5px 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  width: 94px;
+}
+
+.time-input:focus { border-color: var(--accent); }
+
+.time-sep {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sched-del-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background var(--transition), color var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sched-del-btn:hover {
+  background: rgba(196,43,28,0.1);
+  color: var(--danger);
+}
+
+.sched-add-btn {
+  align-self: flex-start;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px dashed var(--card-border);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.sched-add-btn:hover {
+  background: rgba(0,103,192,0.05);
+  border-color: var(--accent);
+}
+
 /* ── 检测路径 ─────────────────────────────────────────────────── */
 .paths-list {
   list-style: none;

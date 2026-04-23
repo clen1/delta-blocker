@@ -3,6 +3,7 @@ const path = require('path')
 const os = require('os')
 const fs = require('fs')
 const { exec, execSync } = require('child_process')
+const crypto = require('crypto')
 
 // ─── 单实例锁 ────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -30,8 +31,16 @@ function saveConfig() {
       blocking: state.blocking,
       autoStart: state.autoStart,
       watchdog: state.watchdog,
+      passwordHash: state.passwordHash,
+      passwordEnabled: state.passwordEnabled,
+      schedule: state.schedule,
+      scheduleEnabled: state.scheduleEnabled,
     }), 'utf8')
   } catch {}
+}
+
+function hashPassword(pwd) {
+  return crypto.createHash('sha256').update(pwd + 'dfblocker_salt_2024').digest('hex')
 }
 
 // ─── 全局状态 ────────────────────────────────────────────────────────────────
@@ -41,12 +50,26 @@ const state = {
   watchdog: false,
   detectedPaths: [],
   log: [],
+  // 密码保护
+  passwordEnabled: false,
+  passwordHash: null,
+  // 时间计划
+  scheduleEnabled: false,
+  // schedule: 每天的允许时段数组，格式 [{start:'09:00', end:'12:00'}, ...]
+  // 结构: { mon:[], tue:[], wed:[], thu:[], fri:[], sat:[], sun:[] }
+  schedule: {
+    mon: [], tue: [], wed: [], thu: [], fri: [],
+    sat: [], sun: [],
+  },
+  // 计划是否当前强制开启了屏蔽
+  scheduleBlocking: false,
 }
 
 let win = null
 let tray = null
 let blockInterval = null
 let fileWatcher = null
+let scheduleTimer = null
 
 // ─── 目标进程名 ──────────────────────────────────────────────────────────────
 const BLOCKED_PROCESSES = [
@@ -250,6 +273,94 @@ function setBlocking(enabled) {
   pushState()
 }
 
+// ─── 时间计划引擎 ─────────────────────────────────────────────────────────────
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+
+function timeToMinutes(t) {
+  const [h, m] = t.split(':').map(Number)
+  return h * 60 + m
+}
+
+function isInAllowedWindow() {
+  const now = new Date()
+  const dayKey = DAY_KEYS[now.getDay()]
+  const slots = (state.schedule[dayKey] || [])
+  if (slots.length === 0) return false  // 没有配置时段 = 全天不允许
+  const cur = now.getHours() * 60 + now.getMinutes()
+  return slots.some(s => {
+    const start = timeToMinutes(s.start)
+    const end   = timeToMinutes(s.end)
+    return cur >= start && cur < end
+  })
+}
+
+function scheduleCheck() {
+  if (!state.scheduleEnabled) return
+  const allowed = isInAllowedWindow()
+  if (!allowed && !state.blocking) {
+    // 不在允许时段，且屏蔽未开启 → 自动开启
+    state.scheduleBlocking = true
+    emitLog('[计划] 当前不在允许时段，自动开启屏蔽', 'warn')
+    setBlocking(true)
+  } else if (allowed && state.scheduleBlocking && state.blocking) {
+    // 进入允许时段，且是计划强制开启的 → 自动关闭
+    state.scheduleBlocking = false
+    emitLog('[计划] 进入允许时段，自动关闭屏蔽', 'success')
+    setBlocking(false)
+  }
+}
+
+function startScheduleTimer() {
+  if (scheduleTimer) clearInterval(scheduleTimer)
+  scheduleCheck()  // 立即检查一次
+  scheduleTimer = setInterval(scheduleCheck, 60 * 1000)  // 每分钟检查
+}
+
+function stopScheduleTimer() {
+  if (scheduleTimer) {
+    clearInterval(scheduleTimer)
+    scheduleTimer = null
+  }
+}
+
+function setScheduleEnabled(enabled) {
+  state.scheduleEnabled = enabled
+  if (enabled) {
+    emitLog('[计划] 时间计划已启用', 'success')
+    startScheduleTimer()
+  } else {
+    stopScheduleTimer()
+    // 如果是计划强制开启的屏蔽，则一并关闭
+    if (state.scheduleBlocking && state.blocking) {
+      state.scheduleBlocking = false
+      setBlocking(false)
+    }
+    emitLog('[计划] 时间计划已停用', 'info')
+  }
+  saveConfig()
+  pushState()
+}
+
+// ─── 密码保护 ─────────────────────────────────────────────────────────────────
+function setPassword(pwd) {
+  if (!pwd || pwd.trim() === '') {
+    state.passwordEnabled = false
+    state.passwordHash = null
+    emitLog('[密码] 密码保护已关闭', 'info')
+  } else {
+    state.passwordHash = hashPassword(pwd)
+    state.passwordEnabled = true
+    emitLog('[密码] 密码保护已设置', 'success')
+  }
+  saveConfig()
+  pushState()
+}
+
+function verifyPassword(pwd) {
+  if (!state.passwordEnabled || !state.passwordHash) return true
+  return hashPassword(pwd) === state.passwordHash
+}
+
 // ─── 防任务管理器守护进程 ────────────────────────────────────────────────────────
 // 停止信号文件（主进程正常退出时写入，通知守护进程不要重启）
 const WATCHDOG_STOP_FILE = path.join(os.tmpdir(), 'dfblocker_stop.sig')
@@ -448,27 +559,48 @@ function rebuildTray() {
   if (!tray) return
   tray.setImage(createTrayIcon())
   tray.setToolTip(state.blocking ? 'Delta Force 屏蔽器 — 屏蔽中' : 'Delta Force 屏蔽器 — 已停止')
-  tray.setContextMenu(Menu.buildFromTemplate([
+
+  const template = [
     {
       label: state.blocking ? '● 屏蔽中' : '○ 已停止',
       enabled: false,
-      icon: undefined,
     },
     { type: 'separator' },
     { label: '显示窗口', click: () => { win.show(); win.focus() } },
     {
       label: state.blocking ? '关闭屏蔽' : '开启屏蔽',
-      click: () => setBlocking(!state.blocking),
+      click: async () => {
+        if (state.blocking && state.passwordEnabled) {
+          // 需要密码验证才能关闭屏蔽
+          win.show(); win.focus()
+          const { response, checkboxChecked } = await dialog.showMessageBox(win, {
+            type: 'warning',
+            buttons: ['取消'],
+            defaultId: 0,
+            title: '需要密码',
+            message: '关闭屏蔽需要密码验证',
+            detail: '请打开主界面，通过密码验证后关闭屏蔽。',
+          })
+          return
+        }
+        setBlocking(!state.blocking)
+      },
     },
-    { type: 'separator' },
-    {
+  ]
+
+  // 只在未屏蔽且未启用密码保护时才显示退出选项
+  if (!state.blocking && !state.passwordEnabled) {
+    template.push({ type: 'separator' })
+    template.push({
       label: '退出',
       click: () => {
         app.isQuitting = true
         app.quit()
       },
-    },
-  ]))
+    })
+  }
+
+  tray.setContextMenu(Menu.buildFromTemplate(template))
 }
 
 // ─── 主窗口 ────────────────────────────────────────────────────────────────────
@@ -537,6 +669,32 @@ ipcMain.handle('trigger-scan', async () => {
   return { ...state }
 })
 
+// ─── 密码 IPC ─────────────────────────────────────────────────────────────────
+ipcMain.handle('set-password', (_e, pwd) => {
+  setPassword(pwd)
+  return { ok: true, passwordEnabled: state.passwordEnabled }
+})
+
+ipcMain.handle('verify-password', (_e, pwd) => {
+  return { ok: verifyPassword(pwd) }
+})
+
+// ─── 时间计划 IPC ──────────────────────────────────────────────────────────────
+ipcMain.handle('set-schedule', (_e, { schedule, enabled }) => {
+  if (schedule !== undefined) state.schedule = schedule
+  if (enabled !== undefined) {
+    setScheduleEnabled(enabled)
+  } else {
+    saveConfig()
+    pushState()
+  }
+  return { ...state }
+})
+
+ipcMain.handle('get-schedule', () => {
+  return { schedule: state.schedule, scheduleEnabled: state.scheduleEnabled }
+})
+
 // ─── 应用初始化 ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // 从配置文件恢复上次状态
@@ -550,6 +708,14 @@ app.whenReady().then(async () => {
   // 恢复进程保护状态
   state.watchdog = config.watchdog || false
   if (state.watchdog) startWatchdog()
+
+  // 恢复密码设置
+  state.passwordEnabled = config.passwordEnabled || false
+  state.passwordHash    = config.passwordHash    || null
+
+  // 恢复时间计划
+  if (config.schedule) state.schedule = config.schedule
+  state.scheduleEnabled = config.scheduleEnabled || false
 
   // 从配置恢复自启状态（UI 显示用），再用任务计划验证实际状态
   state.autoStart = config.autoStart || false
@@ -571,6 +737,12 @@ app.whenReady().then(async () => {
     rebuildTray()
   }
 
+  // 恢复时间计划引擎（在屏蔽状态恢复后启动，避免重复触发）
+  if (state.scheduleEnabled) {
+    emitLog('[计划] 恢复时间计划...', 'info')
+    startScheduleTimer()
+  }
+
   // 启动时扫描
   await runScan()
 
@@ -585,7 +757,14 @@ app.on('window-all-closed', () => {
   // 不退出，保持托盘运行
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
+  // 屏蔽中或密码保护开启时，禁止退出
+  if (state.blocking || state.passwordEnabled) {
+    e.preventDefault()
+    app.isQuitting = false
+    if (win) { win.show(); win.focus() }
+    return
+  }
   app.isQuitting = true
   stopWatchdog()
 })

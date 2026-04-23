@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
+  <title>Delta Force 屏蔽器控制中心</title>
+  <style>
+    /* =========================================
+       全局变量与基础设置 (高密度 Dashboard 风格)
+       ========================================= */
+    :root {
+      --bg-color: #e2e8f0;
+      --card-bg: #ffffff;
+      --primary-color: #4f46e5;
+      --primary-hover: #4338ca;
+      --success-color: #10b981;
+      --danger-color: #ef4444;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border-color: #cbd5e1;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    /* 锁定页面高度，禁止整体滚动 */
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+      background-color: var(--bg-color); 
+      color: var(--text-main); 
+      height: 100vh; 
+      overflow: hidden; 
+      padding: 16px; 
+    }
+
+    /* =========================================
+       三列网格布局 (核心)
+       ========================================= */
+    .dashboard {
+      display: grid;
+      grid-template-columns: 320px minmax(350px, 1fr) 300px;
+      gap: 16px;
+      height: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* 列容器 */
+    .col { display: flex; flex-direction: column; gap: 16px; height: 100%; }
+
+    /* =========================================
+       通用卡片样式
+       ========================================= */
+    .card { 
+      background: var(--card-bg); 
+      border-radius: var(--radius); 
+      padding: 16px; 
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+      border: 1px solid #fff;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+
+    /* =========================================
+       左列：头部与核心开关
+       ========================================= */
+    .hero-card { background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); color: white; border: none; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+    .brand-title { font-size: 18px; font-weight: bold; }
+    .version { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 4px; }
+    
+    .status-area { display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.15); padding: 16px; border-radius: 8px; }
+    .status-info { display: flex; align-items: center; gap: 12px; }
+    .status-icon { font-size: 28px; }
+    .status-label { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
+    .status-desc { font-size: 12px; opacity: 0.8; }
+
+    /* =========================================
+       开关组件 (紧凑型)
+       ========================================= */
+    .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #e2e8f0; }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-info { flex: 1; padding-right: 12px; }
+    .toggle-label { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+    .toggle-desc { font-size: 11px; color: var(--text-muted); }
+
+    .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 22px; }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--success-color); }
+    input:checked + .slider:before { transform: translateX(18px); }
+
+    /* =========================================
+       表单与小组件
+       ========================================= */
+    .pwd-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; background: #f8fafc; padding: 12px; border-radius: 8px; }
+    .pwd-input { width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; outline: none; }
+    .pwd-input:focus { border-color: var(--primary-color); }
+    
+    .btn { background: var(--primary-color); color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; transition: 0.2s; font-weight: 500; }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #f1f5f9; color: var(--text-main); border: 1px solid var(--border-color); }
+    .btn-secondary:hover { background: #e2e8f0; }
+
+    /* 中间列：时间计划 */
+    .schedule-card { flex: 1; } /* 自动撑开高度 */
+    .schedule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 6px; margin: 12px 0; padding: 12px; background: #f8fafc; border-radius: 8px; flex: 1; min-height: 150px; overflow-y: auto;}
+    
+    /* 游戏检测区 */
+    .paths-list { list-style: none; background: #f8fafc; border-radius: 6px; padding: 10px; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); max-height: 80px; overflow-y: auto; }
+
+    /* 右侧列：日志 */
+    .log-card { flex: 1; } /* 撑满右侧高度 */
+    .log-list { flex: 1; overflow-y: auto; list-style: none; background: #0f172a; color: #cbd5e1; border-radius: 8px; padding: 12px; font-family: "Consolas", monospace; font-size: 12px; margin: 0; }
+    .log-entry { margin-bottom: 8px; display: flex; gap: 8px; line-height: 1.4; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; }
+    .log-time { color: #64748b; flex-shrink: 0; }
+    .log-clear { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; }
+    .log-clear:hover { color: var(--danger-color); }
+
+    /* 自定义滚动条 (仅针对内部滚动的区域) */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .log-list::-webkit-scrollbar-thumb { background: #475569; }
+  </style>
+</head>
+<body>
+
+  <div class="dashboard">
+    
+    <div class="col">
+      <div class="card hero-card">
+        <div class="brand">
+          <span style="font-size: 24px;">🚫</span>
+          <div class="brand-title">Delta Blocker</div>
+          <span class="version" id="version">v1.0.0</span>
+        </div>
+        <div class="status-area">
+          <div class="status-info">
+            <div class="status-icon" id="statusIndicator">🛡️</div>
+            <div>
+              <div class="status-label" id="statusLabel">引擎未启动</div>
+              <div class="status-desc" id="statusDesc">拦截功能已关闭</div>
+            </div>
+          </div>
+          <label class="switch" title="开启/关闭屏蔽">
+            <input type="checkbox" id="blockingToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">系统保护</div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">开机静默自启</div>
+            <div class="toggle-desc">系统启动时自动在后台开启拦截</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="autoStartToggle" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">进程防杀保护</div>
+            <div class="toggle-desc">被强制结束后自动复活进程</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="watchdogToggle" /><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1;">
+        <div class="card-title">访问控制</div>
+        <div class="toggle-row" style="border-bottom: none; padding-bottom: 0;">
+          <div class="toggle-info">
+            <div class="toggle-label">启用密码锁</div>
+            <div class="toggle-desc">关闭屏蔽时需验证密码</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="passwordToggle" /><span class="slider"></span></label>
+        </div>
+        <div class="pwd-fields" id="passwordSection">
+          <input type="password" class="pwd-input" id="pwdInput" placeholder="设置新密码 (留空清除)" />
+          <input type="password" class="pwd-input" id="pwdConfirm" placeholder="确认密码" />
+          <button class="btn" id="pwdSaveBtn">保存密码设置</button>
+          <div id="pwdStatus" style="font-size: 11px; text-align: center; margin-top: 4px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card schedule-card">
+        <div class="card-title">
+          时间管控计划
+          <label class="switch" style="transform: scale(0.85); transform-origin: right;">
+            <input type="checkbox" id="scheduleToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">设定允许游玩的时段，计划外将强制断网/屏蔽。</div>
+        
+        <div class="schedule-grid" id="scheduleGrid">
+          <div style="grid-column: 1/-1; text-align: center; color: #94a3b8; align-self: center;">
+            由 app.js 动态生成的时间网格区域
+          </div>
+        </div>
+        
+        <button class="btn btn-secondary" id="scheduleSaveBtn">应用时间计划</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom: 8px; border:none; padding:0;">本地环境检测</div>
+        <ul class="paths-list" id="pathsList">
+          <li class="no-detection">未检测到游戏安装，等待扫描...</li>
+        </ul>
+        <button class="btn btn-secondary" id="scanBtn">🔍 扫描本地磁盘</button>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card log-card">
+        <div class="card-title">
+          运行日志监控
+          <button class="log-clear" id="clearLogBtn">清空</button>
+        </div>
+        <ul class="log-list" id="logList">
+          <li class="log-entry">
+            <span class="log-time">[--:--:--]</span>
+            <span class="log-msg">界面加载完毕，等待引擎交互...</span>
+          </li>
+          <li class="log-entry">
+            <span class="log-time">[--:--:--]</span>
+            <span class="log-msg" style="color: var(--success-color);">UI 布局初始化就绪。</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // 这段脚本仅用于演示主开关的颜色联动，其余逻辑继续使用你的 app.js
+    document.addEventListener("DOMContentLoaded", () => {
+      const toggle = document.getElementById('blockingToggle');
+      const label = document.getElementById('statusLabel');
+      const desc = document.getElementById('statusDesc');
+
+      toggle.addEventListener('change', (e) => {
+        if(e.target.checked) {
+          label.innerText = "引擎运行中";
+          desc.innerText = "Delta Force 已被强制拦截";
+          label.style.color = "#a7f3d0"; // 浅绿色
+        } else {
+          label.innerText = "引擎未启动";
+          desc.innerText = "拦截功能已关闭";
+          label.style.color = "white";
+        }
+      });
+    });
+  </script>
+  
+  <script src="app.js"></script>
+</body>
+</html>

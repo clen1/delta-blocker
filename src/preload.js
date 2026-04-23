@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 手动扫描游戏安装路径
   triggerScan: () => ipcRenderer.invoke('trigger-scan'),
 
+  // 密码保护
+  setPassword: (pwd) => ipcRenderer.invoke('set-password', pwd),
+  verifyPassword: (pwd) => ipcRenderer.invoke('verify-password', pwd),
+
+  // 时间计划
+  setSchedule: (data) => ipcRenderer.invoke('set-schedule', data),
+  getSchedule: () => ipcRenderer.invoke('get-schedule'),
+
   // 接收日志推送 (main → renderer)
   onLogEntry: (callback) => {
     ipcRenderer.on('log-entry', (_event, entry) => callback(entry))
